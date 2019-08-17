@@ -3,7 +3,7 @@
 # project subdirectory.
 #
 
-PROJECT_NAME := deets-fpv-vtx-scanner
+PROJECT_NAME := esp32playground
 
 include $(IDF_PATH)/make/project.mk
 

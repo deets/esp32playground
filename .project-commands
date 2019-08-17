@@ -1,1 +1,1 @@
-:compile-command '(relative "build.sh")
+:compile-command '(absolute "esp32commander build")
