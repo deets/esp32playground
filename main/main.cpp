@@ -45,7 +45,7 @@ void hub()
     switch(res)
     {
     case NRF24_HUB_ERROR_OK:
-      ESP_LOGI("hub", "NRF24_HUB_ERROR_OK");
+      ESP_LOGI("hub", "payload: %s", buffer);
       break;
     case NRF24_HUB_SEND_FAILED:
       {
@@ -71,15 +71,44 @@ void spoke()
   ESP_LOGI("spoke", "I'm the spoke!");
 
   nrf24_setup(spoke_address.data());
+  ESP_LOGI("spoke", "config, should be 12: %i", nrf24_reg_read(NRF24_CONFIG));
 
   TickType_t last_wake_time;
-  const TickType_t period =  pdMS_TO_TICKS(1000);
+  const TickType_t ms1 =  pdMS_TO_TICKS(10);
   last_wake_time = xTaskGetTickCount();
+
+  nrf24_start_listening();
 
   while(1)
   {
-    ESP_LOGI("spoke", "config: %i", nrf24_reg_read(NRF24_CONFIG));
-    vTaskDelayUntil(&last_wake_time, period);
+    bool received = false;
+    for(auto i=0; i < 10; ++i)
+    {
+      if(nrf24_any())
+      {
+        received = true;
+        break;
+      }
+      vTaskDelayUntil(&last_wake_time, ms1);
+    }
+    if(received)
+    {
+      ESP_LOGI("spoke", "I got something!");
+      const auto res = nrf24_spoke_to_hub_send(reinterpret_cast<const uint8_t*>("huhu!\0"), 6);
+      switch(res)
+      {
+      case NRF24_SPOKE_ERROR_OK:
+        ESP_LOGI("spoke", "no error sending");
+        break;
+      case NRF24_SPOKE_SEND_FAILED:
+        ESP_LOGE("spoke", "sending failed");
+        break;
+      }
+    }
+    else
+    {
+      ESP_LOGE("spoke", "nothing for 100ms!");
+    }
   }
 }
 
