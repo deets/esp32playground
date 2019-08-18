@@ -26,41 +26,47 @@ std::array<uint8_t, 6> HUB = {0x30, 0xae, 0xa4, 0x8b, 0x8d, 0xf4};
 std::array<char, 5> hub_address = { 'A', 'N', 'N', 'E', '!' };
 std::array<char, 5> spoke_address = { 'D', 'I', 'E', 'Z', '!' };
 
+// hardware setup on the newjoy baseboard
+const gpio_num_t CE = static_cast<gpio_num_t>(19);
+
+const gpio_num_t CS = static_cast<gpio_num_t>(5);
+const gpio_num_t MISO = static_cast<gpio_num_t>(22);
+const gpio_num_t MOSI = static_cast<gpio_num_t>(23);
+const gpio_num_t SCK = static_cast<gpio_num_t>(18);
+const auto NRF24_SPI_SPEED = 2 * 1000*1000;
+
 void hub()
 {
   ESP_LOGI("hub", "I'm the hub!");
 
-  nrf24_setup(hub_address.data());
+  NRF24 nrf24(CE, CS, SCK, MOSI, MISO, NRF24_SPI_SPEED, hub_address.data());
 
   TickType_t last_wake_time;
   const TickType_t period =  pdMS_TO_TICKS(1000);
   last_wake_time = xTaskGetTickCount();
 
-  ESP_LOGI("hub", "config, should be 12: %i", nrf24_reg_read(NRF24_CONFIG));
+  ESP_LOGI("hub", "config, should be 12: %i", nrf24.reg_read(NRF24_CONFIG));
+  nrf24.stop_listening();
+  nrf24.open_tx_pipe(spoke_address.data(), 32);
+
   while(1)
   {
-    uint8_t *buffer;
-    size_t len;
-    const auto res = nrf24_hub_to_spoke(spoke_address.data(), &buffer, &len);
-    switch(res)
+    nrf24.stop_listening();
+    const auto send_error = nrf24.send((const uint8_t*)"PING\0", 5);
+    nrf24.start_listening();
+    switch(send_error)
     {
-    case NRF24_HUB_ERROR_OK:
-      ESP_LOGI("hub", "payload: %s", buffer);
+    case NRF24_SEND_ERROR_NONE:
+      ESP_LOGE("hub", "sending error none!");
       break;
-    case NRF24_HUB_SEND_FAILED:
-      {
-        const auto observe_tx = nrf24_reg_read(NRF24_OBSERVE_TX);
-        ESP_LOGE("hub", "NRF24_HUB_SEND_FAILED, PLOS: %i", (observe_tx >> 4));
-      }
+    case NRF24_SEND_ERROR_OK:
+      ESP_LOGI("hub", "sending ok!");
       break;
-    case NRF24_HUB_RX_TIMEOUT:
-      ESP_LOGE("hub", "NRF24_HUB_RX_TIMEOUT");
-      break;
-    case NRF24_HUB_PAYLOAD_TOO_LONG:
-      ESP_LOGE("hub", "NRF24_HUB_PAYLOAD_TOO_LONG");
+    case NRF24_SEND_ERROR_MAX_RT:
+    case NRF24_SEND_ERROR_SPURIOUS:
+      ESP_LOGE("hub", "error sending!");
       break;
     }
-
     vTaskDelayUntil(&last_wake_time, period);
   }
 }
@@ -70,21 +76,22 @@ void spoke()
 
   ESP_LOGI("spoke", "I'm the spoke!");
 
-  nrf24_setup(spoke_address.data());
-  ESP_LOGI("spoke", "config, should be 12: %i", nrf24_reg_read(NRF24_CONFIG));
+  NRF24 nrf24(CE, CS, SCK, MOSI, MISO, NRF24_SPI_SPEED, spoke_address.data());
+
+  ESP_LOGI("spoke", "config, should be 12: %i", nrf24.reg_read(NRF24_CONFIG));
 
   TickType_t last_wake_time;
   const TickType_t ms1 =  pdMS_TO_TICKS(10);
   last_wake_time = xTaskGetTickCount();
 
-  nrf24_start_listening();
+  nrf24.start_listening();
 
   while(1)
   {
     bool received = false;
     for(auto i=0; i < 10; ++i)
     {
-      if(nrf24_any())
+      if(nrf24.any())
       {
         received = true;
         break;
@@ -93,21 +100,13 @@ void spoke()
     }
     if(received)
     {
-      ESP_LOGI("spoke", "I got something!");
-      const auto res = nrf24_spoke_to_hub_send(reinterpret_cast<const uint8_t*>("huhu!\0"), 6);
-      switch(res)
-      {
-      case NRF24_SPOKE_ERROR_OK:
-        ESP_LOGI("spoke", "no error sending");
-        break;
-      case NRF24_SPOKE_SEND_FAILED:
-        ESP_LOGE("spoke", "sending failed");
-        break;
-      }
+      std::array<unsigned char, 32> buffer;
+      const auto count = nrf24.recv(buffer.data(), buffer.size());
+      ESP_LOGI("spoke", "recv: %s, count: %i", buffer.data(), count);
     }
     else
     {
-      ESP_LOGE("spoke", "nothing for 100ms!");
+      //ESP_LOGE("spoke", "nothing for 100ms!");
     }
   }
 }
